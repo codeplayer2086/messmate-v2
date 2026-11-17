@@ -1,0 +1,596 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Token types: "EMAIL_VERIFY" | "PASSWORD_RESET"
+model VerificationToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  type      String   // "EMAIL_VERIFY" or "PASSWORD_RESET"
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
+}
+
+enum Role {
+  MANAGER
+  MEMBER
+}
+
+enum CleaningStatus {
+  PENDING
+  DONE
+  SKIPPED
+}
+
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Mess {
+  id             String   @id @default(cuid())
+  name           String
+  inviteCode     String   @unique
+  washroomCount  Int      @default(0)
+  dueThreshold   Float    @default(500)
+  bazarDaysPerWeek Int    @default(3)
+  hasGas         Boolean  @default(false)
+  hasCook        Boolean  @default(false)
+  autoMealEntry  Boolean  @default(false)
+  mealsPerDay    Int      @default(3) // 2 = lunch+dinner, 3 = breakfast+lunch+dinner
+  mealTypes      String   @default("[\"breakfast\",\"lunch\",\"dinner\"]") // JSON array of enabled meal names
+  mealBlackouts  String   @default("[]") // JSON: [{"meals":["breakfast","lunch"],"startHour":6,"endHour":10},{"meals":["dinner"],"startHour":14,"endHour":17}]
+  createdById    String
+  createdBy      User     @relation("MessCreator", fields: [createdById], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  members           User[]             @relation("MessMembers")
+  mealEntries       MealEntry[]
+  deposits          Deposit[]
+  bazarTrips        BazarTrip[]
+  washroomDuties    WashroomCleaning[]
+  managerRotations  ManagerRotation[]
+  auditLogs         AuditLog[]
+  disputes          Dispute[]
+  joinRequests      JoinRequest[]
+  mealPlans         MealPlan[]
+  mealOffRequests   MealOffRequest[]
+  announcements     Announcement[]
+  notifications     Notification[]
+  mealRatings       MealRating[]
+  mealVoteTopics    MealVoteTopic[]
+  billSettings      BillSetting[]
+  billPayments      BillPayment[]
+  memberPresences   MemberPresence[]
+  mealStatuses      MealStatus[]
+  fines             Fine[]
+  bazarDutySchedules   BazarDutySchedule[]
+  washroomDutySchedules WashroomDutySchedule[]
+}
+
+model User {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String?
+  email       String   @unique
+  password    String
+  role        Role     @default(MEMBER)
+  isAdmin     Boolean  @default(false)
+  isOfficer   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  emailVerified Boolean @default(false)
+  messId      String?
+  mess        Mess?    @relation("MessMembers", fields: [messId], references: [id])
+  joinDate    DateTime @default(now())
+  leaveDate   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdMesses     Mess[]             @relation("MessCreator")
+  mealEntries       MealEntry[]
+  deposits          Deposit[]
+  bazarTrips        BazarTrip[]
+  washroomDuties    WashroomCleaning[]
+  managerRotations  ManagerRotation[]
+  auditLogs         AuditLog[]         @relation("EditedBy")
+  disputes          Dispute[]
+  joinRequests      JoinRequest[]
+  mealOffRequests   MealOffRequest[]
+  announcements     Announcement[]
+  notifications     Notification[]
+  mealRatings       MealRating[]
+  mealVotes         MealVote[]
+  billPayments      BillPayment[]
+  presences         MemberPresence[]
+  mealStatuses      MealStatus[]
+  fines             Fine[]
+  finesCreated      Fine[]         @relation("FineCreatedBy")
+  bazarDutySchedules   BazarDutySchedule[]
+  washroomDutySchedules WashroomDutySchedule[]
+  pushSubscriptions     PushSubscription[]
+
+  @@index([messId])
+}
+
+model MealEntry {
+  id        String   @id @default(cuid())
+  date      DateTime
+  memberId  String
+  member    User     @relation(fields: [memberId], references: [id])
+  messId    String
+  mess      Mess     @relation(fields: [messId], references: [id])
+  breakfast Float    @default(0)
+  lunch     Float    @default(0)
+  dinner    Float    @default(0)
+  meals     String   @default("{}") // JSON: {"breakfast":1,"lunch":0,"dinner":1,"snack":0,...} for dynamic meal types
+  total     Float    @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, memberId])
+  @@index([date])
+  @@index([memberId])
+  @@index([messId])
+}
+
+model Deposit {
+  id        String   @id @default(cuid())
+  date      DateTime
+  memberId  String
+  member    User     @relation(fields: [memberId], references: [id])
+  messId    String
+  mess      Mess     @relation(fields: [messId], references: [id])
+  amount    Float
+  note      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+  @@index([memberId])
+  @@index([messId])
+}
+
+model BazarTrip {
+  id            String      @id @default(cuid())
+  date          DateTime
+  buyerId       String
+  buyer         User        @relation(fields: [buyerId], references: [id])
+  messId        String
+  mess          Mess        @relation(fields: [messId], references: [id])
+  totalCost     Float       @default(0)
+  note          String?
+  companionIds  String[]    @default([])
+  approved      Boolean     @default(false)
+  approvedAt    DateTime?
+  approvedById  String?
+  items         BazarItem[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([date])
+  @@index([messId])
+}
+
+model BazarItem {
+  id             String    @id @default(cuid())
+  tripId         String
+  trip           BazarTrip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  serialNo       Int
+  itemName       String
+  normalizedName String?   // ML-ready key (e.g. "chicken", "onion") — auto-filled by catalog
+  category       String?   // ML category (e.g. "protein", "vegetable") — auto-filled
+  quantity       Float
+  unit           String
+  price          Float     @default(0)
+  createdAt      DateTime  @default(now())
+}
+
+model WashroomCleaning {
+  id             String         @id @default(cuid())
+  date           DateTime
+  washroomNumber Int            @default(1)
+  memberId       String
+  member         User           @relation(fields: [memberId], references: [id])
+  messId         String
+  mess           Mess           @relation(fields: [messId], references: [id])
+  status         CleaningStatus @default(DONE)
+  note           String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([date])
+  @@index([messId])
+}
+
+model ManagerRotation {
+  id        String   @id @default(cuid())
+  memberId  String
+  member    User     @relation(fields: [memberId], references: [id])
+  messId    String
+  mess      Mess     @relation(fields: [messId], references: [id])
+  month     Int
+  year      Int
+  createdAt DateTime @default(now())
+
+  @@unique([month, year, messId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  editedById String
+  editedBy   User     @relation("EditedBy", fields: [editedById], references: [id])
+  messId     String
+  mess       Mess     @relation(fields: [messId], references: [id])
+  tableName  String
+  recordId   String
+  fieldName  String
+  oldValue   String?
+  newValue   String?
+  action     String
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([tableName])
+  @@index([messId])
+}
+
+model Dispute {
+  id         String   @id @default(cuid())
+  memberId   String
+  member     User     @relation(fields: [memberId], references: [id])
+  messId     String
+  mess       Mess     @relation(fields: [messId], references: [id])
+  tableName  String
+  recordId   String
+  message    String
+  resolved   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([messId])
+}
+
+model JoinRequest {
+  id         String            @id @default(cuid())
+  userId     String
+  user       User              @relation(fields: [userId], references: [id])
+  messId     String
+  mess       Mess              @relation(fields: [messId], references: [id])
+  status     JoinRequestStatus @default(PENDING)
+  reviewedAt DateTime?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@unique([userId, messId])
+  @@index([messId, status])
+}
+
+enum MealOffStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model MealPlan {
+  id        String   @id @default(cuid())
+  date      DateTime
+  messId    String
+  mess      Mess     @relation(fields: [messId], references: [id])
+  breakfast String?
+  lunch     String?
+  dinner    String?
+  meals     String   @default("{}")
+  cancelledMeals String @default("[]") // JSON array of overridden meal strings e.g. ["lunch"]
+  cancelledSnapshot String @default("{}") // JSON: { "lunch": { "memberId1": 1, "memberId2": 0.5 } } — snapshot before zeroing
+  wastage        String @default("{}") // JSON obj mapping meal string to wastage levels e.g. {"lunch": "high"}
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, messId])
+  @@index([messId])
+  @@index([date])
+}
+
+model MealOffRequest {
+  id            String        @id @default(cuid())
+  memberId      String
+  member        User          @relation(fields: [memberId], references: [id])
+  messId        String
+  mess          Mess          @relation(fields: [messId], references: [id])
+  fromDate      DateTime
+  toDate        DateTime?     // null if durationType is "unknown"
+  durationType  String        @default("finite") // "finite" or "unknown"
+  skipBreakfast Boolean       @default(true)
+  skipLunch     Boolean       @default(true)
+  skipDinner    Boolean       @default(true)
+  reason        String?
+  status        MealOffStatus @default(PENDING)
+  reviewedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([messId])
+  @@index([memberId])
+  @@index([fromDate, toDate])
+}
+
+// ========== ANNOUNCEMENT (Notice Board) ==========
+model Announcement {
+  id        String   @id @default(cuid())
+  messId    String
+  mess      Mess     @relation(fields: [messId], references: [id])
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  title     String
+  body      String
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([messId])
+  @@index([createdAt])
+}
+
+// ========== NOTIFICATION (In-App) ==========
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  messId    String
+  mess      Mess     @relation(fields: [messId], references: [id])
+  type      String   // "deposit_reminder", "meal_off_approved", "announcement", "vote", etc.
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+  @@index([messId])
+}
+
+// ========== MEAL RATING ==========
+model MealRating {
+  id        String   @id @default(cuid())
+  date      DateTime
+  meal      String   // "breakfast", "lunch", "dinner"
+  rating    Int      // 1-5
+  comment   String?
+  memberId  String
+  member    User     @relation(fields: [memberId], references: [id])
+  messId    String
+  mess      Mess     @relation(fields: [messId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([date, meal, memberId])
+  @@index([messId])
+  @@index([date])
+}
+
+// ========== MEAL VOTING ==========
+model MealVoteTopic {
+  id          String     @id @default(cuid())
+  messId      String
+  mess        Mess       @relation(fields: [messId], references: [id])
+  title       String     // e.g. "What should we cook on Friday dinner?"
+  options     String[]   // Array of options: ["Biryani", "Khichuri", "Pasta"]
+  targetDate  DateTime?  // Optional: which date is this vote for
+  targetMeal  String?    // Optional: "breakfast", "lunch", "dinner"
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  votes       MealVote[]
+
+  @@index([messId])
+}
+
+model MealVote {
+  id        String        @id @default(cuid())
+  topicId   String
+  topic     MealVoteTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  voterId   String
+  voter     User          @relation(fields: [voterId], references: [id])
+  option    String        // The chosen option
+  createdAt DateTime      @default(now())
+
+  @@unique([topicId, voterId])
+}
+
+// ========== BILL SETTINGS (Rent + Utilities per month) ==========
+model BillSetting {
+  id          String   @id @default(cuid())
+  messId      String
+  mess        Mess     @relation(fields: [messId], references: [id])
+  month       Int
+  year        Int
+  // Per-member rents stored as JSON: { "userId": amount }
+  rents       String   @default("{}")  // JSON string
+  wifi        Float    @default(0)
+  electricity Float    @default(0)
+  gas         Float    @default(0)
+  cookSalary  Float    @default(0)
+  other       Float    @default(0)
+  otherNote   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([messId, month, year])
+  @@index([messId])
+}
+
+// ========== BILL PAYMENT (Member pays rent+bills) ==========
+model BillPayment {
+  id          String    @id @default(cuid())
+  memberId    String
+  member      User      @relation(fields: [memberId], references: [id])
+  messId      String
+  mess        Mess      @relation(fields: [messId], references: [id])
+  month       Int
+  year        Int
+  amount      Float
+  note        String?
+  confirmed   Boolean   @default(false)
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([messId, month, year])
+  @@index([memberId])
+}
+
+// ========== BAZAR DUTY (Market rotation) ==========
+// BazarDuty removed - bazar trips are now tracked via BazarTrip approval system
+
+// ========== MEMBER PRESENCE (Home/Away toggle) ==========
+model MemberPresence {
+  id        String    @id @default(cuid())
+  memberId  String
+  member    User      @relation(fields: [memberId], references: [id])
+  messId    String
+  mess      Mess      @relation(fields: [messId], references: [id])
+  isAway    Boolean   @default(false)
+  awayFrom  DateTime?
+  awayUntil DateTime?
+  reason    String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([memberId, messId])
+  @@index([messId])
+}
+
+// ========== MEAL STATUS (Per-member per-date per-meal ON/OFF toggle) ==========
+model MealStatus {
+  id        String   @id @default(cuid())
+  date      DateTime
+  meal      String   // "breakfast", "lunch", "dinner"
+  memberId  String
+  member    User     @relation(fields: [memberId], references: [id])
+  messId    String
+  mess      Mess     @relation(fields: [messId], references: [id])
+  isOff     Boolean  @default(false) // false = eating (ON), true = not eating (OFF)
+  changedBy String?  // userId of who changed it (null = self, set = manager override)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date, meal, memberId])
+  @@index([date, messId])
+  @@index([memberId])
+}
+
+// ========== MEAL STATUS SPECIAL REQUEST (During blackout) ==========
+model MealStatusRequest {
+  id        String   @id @default(cuid())
+  date      DateTime
+  meal      String   // "breakfast", "lunch", "dinner"
+  memberId  String
+  messId    String
+  wantOff   Boolean  // true = wants to turn off, false = wants to turn on
+  reason    String?
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt DateTime @default(now())
+
+  @@index([messId, status])
+  @@index([memberId])
+}
+
+// ========== ADMIN SETTINGS (Key-Value store for platform) ==========
+model AdminSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ========== FINES ==========
+model Fine {
+  id          String    @id @default(cuid())
+  memberId    String
+  member      User      @relation(fields: [memberId], references: [id])
+  messId      String
+  mess        Mess      @relation(fields: [messId], references: [id])
+  amount      Float
+  reason      String
+  settled     Boolean   @default(false)
+  settledAt   DateTime?
+  createdById String
+  createdBy   User      @relation("FineCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([messId])
+  @@index([memberId])
+}
+
+// ========== BAZAR DUTY SCHEDULE ==========
+model BazarDutySchedule {
+  id          String    @id @default(cuid())
+  date        DateTime
+  memberId    String
+  member      User      @relation(fields: [memberId], references: [id])
+  messId      String
+  mess        Mess      @relation(fields: [messId], references: [id])
+  completed   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([date])
+  @@index([messId])
+  @@index([memberId])
+}
+
+// ========== WASHROOM DUTY SCHEDULE ==========
+model WashroomDutySchedule {
+  id             String    @id @default(cuid())
+  date           DateTime
+  memberId       String
+  member         User      @relation(fields: [memberId], references: [id])
+  messId         String
+  mess           Mess      @relation(fields: [messId], references: [id])
+  washroomNumber Int       @default(1)
+  completed      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([date])
+  @@index([messId])
+  @@index([memberId])
+}
+
+// ========== DUTY SWAP REQUEST ==========
+model DutySwapRequest {
+  id            String   @id @default(cuid())
+  dutyType      String   // "BAZAR" | "WASHROOM"
+  fromDutyId    String   // ID of the requester's duty
+  toDutyId      String   // ID of the target's duty to swap with
+  requesterId   String
+  messId        String
+  status        String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  createdAt     DateTime @default(now())
+
+  @@index([messId, status])
+}
+
+// ========== PUSH SUBSCRIPTION ==========
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}

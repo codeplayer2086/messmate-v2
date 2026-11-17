@@ -1,0 +1,8 @@
+{
+  "name": "MessMate V2",
+  "description": "Transparent student mess meal, bazar ledger, billing, and anti-cheat audit management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
